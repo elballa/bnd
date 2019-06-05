@@ -3,6 +3,7 @@ package aQute.bnd.maven.baseline.plugin;
 import static org.apache.maven.plugins.annotations.LifecyclePhase.VERIFY;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Formatter;
 import java.util.List;
 import java.util.ListIterator;
@@ -35,7 +36,8 @@ import org.slf4j.LoggerFactory;
 import aQute.bnd.differ.Baseline;
 import aQute.bnd.differ.Baseline.BundleInfo;
 import aQute.bnd.differ.Baseline.Info;
-import aQute.bnd.differ.DiffPluginImpl;
+import aQute.bnd.differ.Exclusion;
+import aQute.bnd.differ.ExclusionsDiffPluginImpl;
 import aQute.bnd.header.Parameters;
 import aQute.bnd.osgi.Instructions;
 import aQute.bnd.osgi.Jar;
@@ -49,7 +51,7 @@ import aQute.service.reporter.Reporter;
  */
 @Mojo(name = "baseline", defaultPhase = VERIFY)
 public class BaselineMojo extends AbstractMojo {
-	private static final Logger		logger	= LoggerFactory.getLogger(BaselineMojo.class);
+	private static final Logger		logger			= LoggerFactory.getLogger(BaselineMojo.class);
 	private static final String		PACKAGING_POM	= "pom";
 
 	@Parameter(defaultValue = "${project}", readonly = true, required = true)
@@ -85,6 +87,9 @@ public class BaselineMojo extends AbstractMojo {
 	@Component
 	private RepositorySystem		system;
 
+	@Parameter(required = false)
+	private List<Exclusion>			exclusions		= new ArrayList<>();
+
 	@Override
 	public void execute() throws MojoExecutionException, MojoFailureException {
 		if (skip) {
@@ -97,6 +102,15 @@ public class BaselineMojo extends AbstractMojo {
 		if (PACKAGING_POM.equals(project.getPackaging())) {
 			logger.info("skip project with packaging=pom");
 			return;
+		}
+
+		if (!exclusions.isEmpty()) {
+			for (Exclusion exclusion : exclusions) {
+				if (exclusion.getType() == null || exclusion.getName() == null) {
+					throw new MojoFailureException(
+						"Exclusions parameter must contain type and name parameter for each element");
+				}
+			}
 		}
 
 		Artifact artifact = RepositoryUtils.toArtifact(project.getArtifact());
@@ -120,8 +134,9 @@ public class BaselineMojo extends AbstractMojo {
 					reporter = new ReporterAdapter();
 				}
 
-				DiffPluginImpl differ = new DiffPluginImpl();
+				ExclusionsDiffPluginImpl differ = new ExclusionsDiffPluginImpl();
 				differ.setIgnore(new Parameters(Strings.join(",", diffignores), processor));
+				differ.setExclusions(exclusions);
 				Baseline baseline = new Baseline(reporter, differ);
 
 				if (checkFailures(artifact, artifactResult, baseline,
@@ -237,8 +252,8 @@ public class BaselineMojo extends AbstractMojo {
 		return system.resolveArtifact(session, new ArtifactRequest(toFind, aetherRepos, "baseline"));
 	}
 
-	private boolean checkFailures(Artifact artifact, ArtifactResult artifactResult, Baseline baseline, Instructions diffpackages)
-		throws Exception, IOException {
+	private boolean checkFailures(Artifact artifact, ArtifactResult artifactResult, Baseline baseline,
+		Instructions diffpackages) throws Exception, IOException {
 		StringBuffer sb = new StringBuffer();
 		try (Formatter f = new Formatter(sb, Locale.US);
 			Jar newer = new Jar(artifact.getFile());
